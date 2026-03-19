@@ -9,6 +9,7 @@ to ±tss_window_bp of transcriptional start sites.
 from __future__ import annotations
 
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -80,6 +81,7 @@ def _load_tss_with_genes(gtf_path: str) -> List[Tuple[str, int, str]]:
     return out
 
 
+@lru_cache(maxsize=4)
 def _load_tss_table(tsv_path: str) -> List[Tuple[str, int, str]]:
     """
     Load a precomputed TSS table (lite mode).
@@ -200,13 +202,18 @@ def _scan_sequence_for_hits(
     hits: List[dict] = []
     if len(seq) < 23:
         return hits
+    # PAM-proximal seed match (computed once; previously recomputed inside the loop)
+    seed_rc = reverse_complement(guide_last_n)
+    seed_start = 20 - min_seed_length
     for i in range(0, len(seq) - 23 + 1):
+        # PAM NGG means positions i+21 and i+22 are both G
+        if seq[i + 21] != "G" or seq[i + 22] != "G":
+            continue
+        # Perfect PAM-proximal seed match
+        if seq[i + seed_start : i + 20] != seed_rc:
+            continue
         prot = seq[i : i + 20]
         pam = seq[i + 20 : i + 23]
-        if len(pam) < 3 or pam[1] != "G" or pam[2] != "G":
-            continue
-        if prot[20 - min_seed_length : 20] != reverse_complement(guide_last_n):
-            continue
         seed_len = _count_pam_proximal_matches(prot, guide_rc)
         if seed_len < min_seed_length:
             continue
@@ -229,12 +236,14 @@ def _scan_sequence_for_hits(
             "ucsc_url": _ucsc_url(chrom, start_1, end_1),
         })
     for i in range(0, len(seq) - 23 + 1):
+        # Reverse-strand equivalent PAM is CCN: positions i and i+1 are both C
+        if seq[i] != "C" or seq[i + 1] != "C":
+            continue
+        # Perfect seed match is on the 5' end of the protospacer for this orientation
+        if seq[i + 3 : i + 3 + min_seed_length] != seed_rc:
+            continue
         pam_ccn = seq[i : i + 3]
         prot_ref = seq[i + 3 : i + 23]
-        if len(pam_ccn) < 3 or len(prot_ref) < 20 or pam_ccn[0] != "C" or pam_ccn[1] != "C":
-            continue
-        if prot_ref[:min_seed_length] != reverse_complement(guide_last_n):
-            continue
         prot_minus = reverse_complement(prot_ref)
         seed_len = _count_pam_proximal_matches(prot_minus, guide)
         if seed_len < min_seed_length:
