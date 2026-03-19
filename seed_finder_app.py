@@ -68,7 +68,7 @@ def main():
                     gtf_path=None,
                     tss_table_path=str(tss_table_path),
                     min_seed_length=min_seed,
-                    tss_window_bp=2000,
+                    tss_window_bp=1000,
                 )
             except Exception as e:
                 st.exception(e)
@@ -77,7 +77,7 @@ def main():
         st.success(f"Found **{len(results)}** seed match(es).")
 
         if not results:
-            st.info("No matches in the default TSS window (2000 bp) for this guide.")
+            st.info("No matches in the default TSS window (1000 bp) for this guide.")
             return
 
         st.subheader("UCSC links")
