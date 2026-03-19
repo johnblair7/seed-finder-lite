@@ -1,0 +1,1 @@
+# seed-finder-lite\n\nStreamlit Seed Finder (promoter FASTA mode) for phospho-seq embedding.\n

@@ -1,0 +1,157 @@
+Metadata-Version: 2.4
+Name: targetfinder
+Version: 0.1.0
+Summary: Target discovery and analysis
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pyfaidx>=0.7.0
+Requires-Dist: pandas>=1.0
+
+# TargetFinder
+
+CRISPR guide RNA off-target finder for the human genome. Upload tens of thousands of guides and get a CSV with off-target coordinates, nearest gene, TSS distance, PAM motif, and mismatch count. Run from **Jupyter** (conda env) or the CLI; use a **cached Bowtie2 index** (build once); split/merge for **cluster** runs.
+
+## Requirements
+
+- Python 3.8+
+- [Bowtie2](https://bowtie-bio.sourceforge.net/bowtie2/) (conda: `bowtie2` in `environment.yml`; or `brew install bowtie2`)
+- Human genome reference (GRCh38/hg38) and gene annotations
+
+## Setup
+
+### Option A: Conda + Jupyter (recommended)
+
+From the repo root:
+
+```bash
+cd TargetFinder
+conda env create -f environment.yml
+conda activate targetfinder
+pip install -e .   # if not already installed by env
+```
+
+Then open `notebooks/off_target_analysis.ipynb` and run. The notebook uses a **cached index**: you build the Bowtie2 index once in `refs/`, then reuse the same paths for every run.
+
+### Option B: venv + CLI
+
+```bash
+cd TargetFinder
+python -m venv venv
+source venv/bin/activate
+pip install -e .
+```
+
+### Download references and build index (once)
+
+Download the human genome and GENCODE GTF (see `scripts/setup_reference.sh`), then **build the Bowtie2 index once**—this is your cache. Reuse the same `refs/` paths for all future runs.
+
+```bash
+# Example: after downloading genome.fa and gencode.gtf into refs/
+bowtie2-build refs/genome.fa refs/hg38
+```
+
+Index files (`refs/hg38.*.bt2`) are created once; point every run at `--bowtie-index refs/hg38`.
+
+## Input format
+
+CSV or TSV with columns `guide_ID` and `sequence` (20 bp each):
+
+| guide_ID | sequence |
+|----------|----------|
+| guide_001 | ATCGATCGATCGATCGATCG |
+| guide_002 | GCTAGCTAGCTAGCTAGCTA |
+
+## Usage
+
+### From Jupyter (conda env)
+
+```python
+import targetfinder as tf
+from pathlib import Path
+
+paths = tf.get_ref_paths(Path("refs"))  # cached index + genome + GTF
+df = tf.run_off_target_analysis(
+    "guides.csv",
+    bowtie_index=paths["bowtie_index"],
+    genome_fa=paths["genome_fa"],
+    gtf=paths["gtf"],
+    output_path="off_targets.csv",
+    return_dataframe=True,
+)
+```
+
+See `notebooks/off_target_analysis.ipynb` for the full workflow.
+
+### From the CLI
+
+```bash
+targetfinder guides.csv \
+  --bowtie-index refs/hg38 \
+  --genome refs/genome.fa \
+  --gtf refs/gencode.gtf \
+  -o off_targets.csv
+```
+
+### Options
+
+- `-o`, `--output` – Output CSV path (default: stdout)
+- `-n`, `--max-mismatches` – Max mismatches 0–3 (default: 3)
+- `-k`, `--max-alignments` – Max alignments per guide (default: 500; use a larger value on a cluster)
+
+## Output
+
+CSV with columns:
+
+| Column | Description |
+|--------|-------------|
+| guide_id | Input guide identifier |
+| chr | Chromosome |
+| start | Start coordinate (1-based) |
+| end | End coordinate |
+| strand | + or - |
+| mismatches | Number of mismatches vs guide |
+| pam | PAM motif (NGG) |
+| protospacer | Protospacer sequence from alignment (reverse complement of guide) |
+| guide_sequence | Original input guide sequence (20 bp) |
+| aligned_sequence | Genome sequence at this site (20 bp, in guide orientation for comparison) |
+| nearest_gene | Nearest gene symbol |
+| tss_distance | Distance to nearest TSS (bp) |
+| score | Off-target risk score (higher = more concern) |
+| flag | `BD` if on-target has another gene's TSS within 2 kb, else empty |
+| same_locus | True if this site is in the same gene as the intended target (score set to 0) |
+
+Sites with any mismatch in the first 5 bases (PAM-proximal) are excluded from output.
+
+## Scoring
+
+- **TSS distance:** Closer to the off-target gene's TSS gives more points (≤200 bp: 40 pts; 200–2000 bp: 10–40 pts; >2000 bp: 0).
+- **Seed (PAM-proximal):** Perfect alignment in the first 10 bases from the PAM scores 50 pts; the first mismatch in positions 1–10 reduces the score; any mismatch in the first 5 bases **excludes** the site.
+- **Same locus:** If the off-target’s nearest gene is the same as the intended target (the 0-mismatch site’s gene), the score is set to 0.
+- **BD:** If the **on-target** (0-mismatch) site has another gene’s TSS within 2000 bp, that row is flagged `BD` and receives a large bonus (100 pts).
+- A small penalty is applied for total mismatch count. Weights are tunable in `src/targetfinder/score.py`.
+
+## PAM and strand
+
+TargetFinder uses the SpCas9 PAM (5′-NGG-3′). Both strands are searched; CCN on the opposite strand is treated as equivalent. Only PAM-adjacent sites are reported.
+
+## Cluster runs
+
+For large guide sets, split inputs into chunks, run each chunk as a separate job (same cached index on each node), then merge:
+
+```python
+from targetfinder.cluster_utils import split_guides, merge_results
+
+split_guides("guides.csv", n_chunks=20, output_dir="chunks")
+# Submit 20 jobs, each running: targetfinder chunks/chunk_000.csv ... -o results/chunk_000.csv -k 10000
+merge_results(sorted(Path("results").glob("chunk_*.csv")), "off_targets_merged.csv")
+```
+
+## Index caching
+
+- Build the Bowtie2 index **once** per genome (e.g. `bowtie2-build refs/genome.fa refs/hg38`).
+- Use the same `refs/` paths for every run; no need to rebuild unless you change genome or index name.
+- On a cluster, put the index on shared storage so all nodes use the same cached index.
+
+## Future: prioritization scores
+
+Planned: weighted scoring by mismatch position (seed vs distal), TSS proximity for CRISPRi/CRISPRa, and genomic context to sort off-targets from more to less likely.

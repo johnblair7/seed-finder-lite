@@ -1,0 +1,2 @@
+[console_scripts]
+targetfinder = targetfinder.main:main

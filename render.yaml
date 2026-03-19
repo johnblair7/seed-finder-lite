@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: seed-finder-lite
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run seed_finder_app.py --server.address 0.0.0.0 --server.port $PORT
