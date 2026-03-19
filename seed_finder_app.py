@@ -47,8 +47,6 @@ def main():
     col1, col2 = st.columns(2)
     with col1:
         min_seed = st.slider("Min seed length", min_value=5, max_value=20, value=8)
-    with col2:
-        tss_window = st.number_input("TSS window (bp)", min_value=500, max_value=10000, value=2000)
 
     if st.button("Find seed matches"):
         if not guide or len(guide) != 20:
@@ -70,7 +68,7 @@ def main():
                     gtf_path=None,
                     tss_table_path=str(tss_table_path),
                     min_seed_length=min_seed,
-                    tss_window_bp=tss_window,
+                    tss_window_bp=2000,
                 )
             except Exception as e:
                 st.exception(e)
@@ -79,7 +77,7 @@ def main():
         st.success(f"Found **{len(results)}** seed match(es).")
 
         if not results:
-            st.info("No matches in TSS regions. Try a larger TSS window or a different guide.")
+            st.info("No matches in the default TSS window (2000 bp) for this guide.")
             return
 
         st.subheader("UCSC links")
